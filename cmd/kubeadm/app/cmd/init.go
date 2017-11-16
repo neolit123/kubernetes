@@ -21,7 +21,9 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -66,13 +68,7 @@ import (
 var (
 	initDoneTempl = template.Must(template.New("init").Parse(dedent.Dedent(`
 		Your Kubernetes master has initialized successfully!
-
-		To start using your cluster, you need to run the following as a regular user:
-
-		  mkdir -p $HOME/.kube
-		  sudo cp -i {{.KubeConfigPath}} $HOME/.kube/config
-		  sudo chown $(id -u):$(id -g) $HOME/.kube/config
-
+		{{.KubeConfigInfo}}
 		You should now deploy a pod network to the cluster.
 		Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
 		  https://kubernetes.io/docs/concepts/cluster-administration/addons/
@@ -114,6 +110,7 @@ func NewCmdInit(out io.Writer) *cobra.Command {
 	var featureGatesString string
 	var criSocket string
 	var ignorePreflightErrors []string
+	var copyCredentialsForUser string
 
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -131,7 +128,7 @@ func NewCmdInit(out io.Writer) *cobra.Command {
 			ignorePreflightErrorsSet, err := validation.ValidateIgnorePreflightErrors(ignorePreflightErrors, skipPreFlight)
 			kubeadmutil.CheckErr(err)
 
-			i, err := NewInit(cfgPath, internalcfg, ignorePreflightErrorsSet, skipTokenPrint, dryRun, criSocket)
+			i, err := NewInit(cfgPath, internalcfg, ignorePreflightErrorsSet, skipTokenPrint, dryRun, criSocket, copyCredentialsForUser)
 			kubeadmutil.CheckErr(err)
 			kubeadmutil.CheckErr(i.Validate(cmd))
 			kubeadmutil.CheckErr(i.Run(out))
@@ -139,7 +136,7 @@ func NewCmdInit(out io.Writer) *cobra.Command {
 	}
 
 	AddInitConfigFlags(cmd.PersistentFlags(), cfg, &featureGatesString)
-	AddInitOtherFlags(cmd.PersistentFlags(), &cfgPath, &skipPreFlight, &skipTokenPrint, &dryRun, &criSocket, &ignorePreflightErrors)
+	AddInitOtherFlags(cmd.PersistentFlags(), &cfgPath, &skipPreFlight, &skipTokenPrint, &dryRun, &criSocket, &ignorePreflightErrors, &copyCredentialsForUser)
 
 	return cmd
 }
@@ -195,7 +192,7 @@ func AddInitConfigFlags(flagSet *flag.FlagSet, cfg *kubeadmapiext.MasterConfigur
 }
 
 // AddInitOtherFlags adds init flags that are not bound to a configuration file to the given flagset
-func AddInitOtherFlags(flagSet *flag.FlagSet, cfgPath *string, skipPreFlight, skipTokenPrint, dryRun *bool, criSocket *string, ignorePreflightErrors *[]string) {
+func AddInitOtherFlags(flagSet *flag.FlagSet, cfgPath *string, skipPreFlight, skipTokenPrint, dryRun *bool, criSocket *string, ignorePreflightErrors *[]string, copyCredentialsForUser *string) {
 	flagSet.StringVar(
 		cfgPath, "config", *cfgPath,
 		"Path to kubeadm config file. WARNING: Usage of a configuration file is experimental.",
@@ -224,10 +221,14 @@ func AddInitOtherFlags(flagSet *flag.FlagSet, cfgPath *string, skipPreFlight, sk
 		criSocket, "cri-socket", "/var/run/dockershim.sock",
 		`Specify the CRI socket to connect to.`,
 	)
+	flagSet.StringVar(
+		copyCredentialsForUser, "copy-credentials-for-user", *copyCredentialsForUser,
+		"The administrator's credentials for the cluster will be copied to this user's home directory. WARNING: existing files will be overwritten.",
+	)
 }
 
 // NewInit validates given arguments and instantiates Init struct with provided information.
-func NewInit(cfgPath string, cfg *kubeadmapi.MasterConfiguration, ignorePreflightErrors sets.String, skipTokenPrint, dryRun bool, criSocket string) (*Init, error) {
+func NewInit(cfgPath string, cfg *kubeadmapi.MasterConfiguration, ignorePreflightErrors sets.String, skipTokenPrint, dryRun bool, criSocket string, copyCredentialsForUser string) (*Init, error) {
 	fmt.Println("[kubeadm] WARNING: kubeadm is currently in beta")
 
 	if cfgPath != "" {
@@ -268,14 +269,15 @@ func NewInit(cfgPath string, cfg *kubeadmapi.MasterConfiguration, ignorePrefligh
 	// Try to start the kubelet service in case it's inactive
 	preflight.TryStartKubelet(ignorePreflightErrors)
 
-	return &Init{cfg: cfg, skipTokenPrint: skipTokenPrint, dryRun: dryRun}, nil
+	return &Init{cfg: cfg, skipTokenPrint: skipTokenPrint, dryRun: dryRun, copyCredentialsForUser: copyCredentialsForUser}, nil
 }
 
 // Init defines struct used by "kubeadm init" command
 type Init struct {
-	cfg            *kubeadmapi.MasterConfiguration
-	skipTokenPrint bool
-	dryRun         bool
+	cfg                    *kubeadmapi.MasterConfiguration
+	skipTokenPrint         bool
+	dryRun                 bool
+	copyCredentialsForUser string
 }
 
 // Validate validates configuration passed to "kubeadm init"
@@ -457,16 +459,99 @@ func (i *Init) Run(out io.Writer) error {
 	}
 
 	ctx := map[string]string{
-		"KubeConfigPath": adminKubeConfigPath,
 		"Token":          i.cfg.Token,
 		"CAPubKeyPin":    pubkeypin.Hash(caCert),
 		"MasterHostPort": masterHostPort,
 	}
+
+	kubeConfigInfo := fmt.Sprintf(`
+To start using your cluster, you need to run the following as a regular user:
+
+	  mkdir -p $HOME/.kube
+	  sudo cp -i %s $HOME/.kube/config
+	  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+`, adminKubeConfigPath)
+
 	if i.skipTokenPrint {
 		ctx["Token"] = "<value withheld>"
 	}
 
+	ctx["KubeConfigInfo"] = kubeConfigInfo
+	if i.copyCredentialsForUser != "" {
+		if err := copyCredentialsForUser(i.copyCredentialsForUser, adminKubeConfigPath); err == nil {
+			ctx["KubeConfigInfo"] = ""
+		} else {
+			fmt.Printf("[init] WARNING: Could not copy the administrator credentials for user %q: %v.\n", i.copyCredentialsForUser, err)
+		}
+	}
+
 	return initDoneTempl.Execute(out, ctx)
+}
+
+func copyCredentialsForUser(copyCredentialsForUser string, adminKubeConfigPath string) error {
+
+	var err error
+	var uid, gid int
+	var usr *user.User
+	var src, dest *os.File
+	var kubeDir, configFilePath string
+
+	usr, err = user.Lookup(copyCredentialsForUser)
+	if err != nil {
+		return fmt.Errorf("no such user")
+	}
+
+	if usr.HomeDir == "" {
+		return fmt.Errorf("cannot obtain the home directory for this user")
+	}
+	kubeDir = usr.HomeDir + "/.kube"
+	configFilePath = kubeDir + "/config"
+
+	fmt.Printf("[init] Copying administrator credentials to %q from %q.\n", configFilePath, adminKubeConfigPath)
+
+	uid, err = strconv.Atoi(usr.Uid)
+	if err != nil {
+		return fmt.Errorf("cannot Atoi() UID string %q", usr.Uid)
+	}
+
+	gid, err = strconv.Atoi(usr.Gid)
+	if err != nil {
+		return fmt.Errorf("cannot Atoi() GID string %q", usr.Gid)
+	}
+
+	err = os.MkdirAll(kubeDir, 0700)
+	if err != nil {
+		return fmt.Errorf("cannot create %q", kubeDir)
+	}
+
+	err = os.Chown(kubeDir, uid, gid)
+	if err != nil {
+		return fmt.Errorf("cannot chown %q", kubeDir)
+	}
+
+	src, err = os.Open(adminKubeConfigPath)
+	if err != nil {
+		return fmt.Errorf("cannot open file for reading %q", adminKubeConfigPath)
+	}
+	defer src.Close()
+
+	dest, err = os.OpenFile(configFilePath, os.O_RDWR|os.O_CREATE, 0700)
+	if err != nil {
+		return fmt.Errorf("cannot open file for writing %q", configFilePath)
+	}
+	defer dest.Close()
+
+	if _, err := io.Copy(dest, src); err != nil {
+		return fmt.Errorf("cannot io.Copy() the configuration")
+	}
+
+	err = os.Chown(configFilePath, uid, gid)
+	if err != nil {
+		return fmt.Errorf("cannot chown %q", configFilePath)
+	}
+
+	return nil
 }
 
 // createClient creates a clientset.Interface object
