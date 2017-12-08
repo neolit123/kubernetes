@@ -21,8 +21,10 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"text/template"
@@ -32,7 +34,7 @@ import (
 	"github.com/spf13/cobra"
 	flag "github.com/spf13/pflag"
 
-	"k8s.io/apimachinery/pkg/runtime"
+	kuberuntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
@@ -236,7 +238,7 @@ func NewInit(cfgPath string, cfg *kubeadmapi.MasterConfiguration, ignorePrefligh
 		if err != nil {
 			return nil, fmt.Errorf("unable to read config from %q [%v]", cfgPath, err)
 		}
-		if err := runtime.DecodeInto(legacyscheme.Codecs.UniversalDecoder(), b, cfg); err != nil {
+		if err := kuberuntime.DecodeInto(legacyscheme.Codecs.UniversalDecoder(), b, cfg); err != nil {
 			return nil, fmt.Errorf("unable to decode config from %q [%v]", cfgPath, err)
 		}
 	}
@@ -502,6 +504,24 @@ func copyCredentialsForUser(copyCredentialsForUser string, adminKubeConfigPath s
 		return fmt.Errorf("no such user")
 	}
 
+	// check if user is root; User.Gid doesn't work on Windows
+	usrRootMessage := "user cannot be root"
+	if runtime.GOOS == "windows" {
+		if _, err := exec.Command("net", "session", ">nul", "2>&1").Output(); err != nil {
+			return fmt.Errorf(usrRootMessage)
+		}
+	} else if usr.Gid == "0" {
+		return fmt.Errorf(usrRootMessage)
+	}
+
+	// User.HomeDir don't work on Windows
+	if runtime.GOOS == "windows" {
+		usr.HomeDir = ""
+		out, err := exec.Command("cmd", "/c", "reg", "query", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\"+usr.Uid, "/v", "ProfileImagePath").Output()
+		if err == nil {
+			usr.HomeDir = strings.Fields(string(out))[4]
+		}
+	}
 	if usr.HomeDir == "" {
 		return fmt.Errorf("cannot obtain the home directory for this user")
 	}
@@ -520,14 +540,20 @@ func copyCredentialsForUser(copyCredentialsForUser string, adminKubeConfigPath s
 		return fmt.Errorf("cannot Atoi() GID string %q", usr.Gid)
 	}
 
-	err = os.MkdirAll(kubeDir, 0700)
-	if err != nil {
+	if err := os.MkdirAll(kubeDir, 0700); err != nil {
 		return fmt.Errorf("cannot create %q", kubeDir)
 	}
 
-	err = os.Chown(kubeDir, uid, gid)
-	if err != nil {
-		return fmt.Errorf("cannot chown %q", kubeDir)
+	// Chown doesn't work on Windows
+	chownError := "cannot chown %q"
+	if runtime.GOOS != "windows" {
+		if err := os.Chown(kubeDir, uid, gid); err != nil {
+			return fmt.Errorf(chownError, kubeDir)
+		}
+	} else {
+		if _, err := exec.Command("cacls", kubeDir, "/e", "/g", copyCredentialsForUser+":f").Output(); err != nil {
+			return fmt.Errorf(chownError, kubeDir)
+		}
 	}
 
 	src, err = os.Open(adminKubeConfigPath)
@@ -546,9 +572,12 @@ func copyCredentialsForUser(copyCredentialsForUser string, adminKubeConfigPath s
 		return fmt.Errorf("cannot io.Copy() the configuration")
 	}
 
-	err = os.Chown(configFilePath, uid, gid)
-	if err != nil {
-		return fmt.Errorf("cannot chown %q", configFilePath)
+	if runtime.GOOS != "windows" {
+		if err := os.Chown(configFilePath, uid, gid); err != nil {
+			return fmt.Errorf(chownError, configFilePath)
+		}
+	} else if _, err := exec.Command("cacls", configFilePath, "/e", "/g", copyCredentialsForUser+":f").Output(); err != nil {
+		return fmt.Errorf(chownError, kubeDir)
 	}
 
 	return nil
