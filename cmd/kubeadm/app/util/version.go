@@ -17,6 +17,7 @@ limitations under the License.
 package util
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -24,7 +25,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang/glog"
 	netutil "k8s.io/apimachinery/pkg/util/net"
+	versionutil "k8s.io/kubernetes/pkg/util/version"
+	pkgversion "k8s.io/kubernetes/pkg/version"
 )
 
 const (
@@ -37,6 +41,26 @@ var (
 	kubeReleaseLabelRegex = regexp.MustCompile(`^[[:lower:]]+(-[-\w_\.]+)?$`)
 	kubeBucketPrefixes    = regexp.MustCompile(`^((release|ci|ci-cross)/)?([-\w_\.+]+)$`)
 )
+
+type status404Error struct {
+	message string
+}
+
+func (err status404Error) Error() string {
+	return err.message
+}
+
+func isStatus404Error(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch err.(type) {
+	case status404Error:
+		return true
+	default:
+		return false
+	}
+}
 
 // KubernetesReleaseVersion is helper function that can fetch
 // available version information from release servers based on
@@ -72,11 +96,21 @@ func KubernetesReleaseVersion(version string) (string, error) {
 		return ver, nil
 	}
 
+	// kubeReleaseLabelRegex matches labels such as: latest, latest-1, latest-1.10
 	if kubeReleaseLabelRegex.MatchString(versionLabel) {
 		url := fmt.Sprintf("%s/%s.txt", bucketURL, versionLabel)
 		body, err := fetchFromURL(url, getReleaseVersionTimeout)
 		if err != nil {
-			return "", err
+			if !isStatus404Error(err) {
+				return "", err
+			}
+			// Handle air-gapped environments by falling back to the client version.
+			glog.Infof("could not fetch a Kubernetes version from the internet: %v", err)
+			body, err = kubeadmVersion(pkgversion.Get().String())
+			if err != nil {
+				return "", err
+			}
+			glog.Infof("falling back to the local client version: %s", body)
 		}
 		// Re-validate received version and return.
 		return KubernetesReleaseVersion(body)
@@ -138,6 +172,7 @@ func splitVersion(version string) (string, string, error) {
 
 // Internal helper: return content of URL
 func fetchFromURL(url string, timeout time.Duration) (string, error) {
+	glog.V(2).Infof("fetching Kubernetes version from URL: %s", url)
 	client := &http.Client{Timeout: timeout, Transport: netutil.SetOldTransportDefaults(&http.Transport{})}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -145,11 +180,40 @@ func fetchFromURL(url string, timeout time.Duration) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unable to fetch file. URL: %q Status: %v", url, resp.Status)
+		msg := fmt.Sprintf("unable to fetch file. URL: %q, status: %v", url, resp.Status)
+		// do special handling for 404, as this means that the version file is missing on the server
+		if resp.StatusCode == http.StatusNotFound {
+			return "", status404Error{message: msg}
+		}
+		return "", errors.New(msg)
 	}
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("unable to read content of URL %q: %s", url, err.Error())
 	}
 	return strings.TrimSpace(string(body)), nil
+}
+
+// kubeadmVersion returns the version of the client without metadata.
+func kubeadmVersion(info string) (string, error) {
+	v, err := versionutil.ParseSemantic(info)
+	if err != nil {
+		return "", fmt.Errorf("kubeadm version error: %v", err)
+	}
+	// There is no utility in versionutil to get the version without the metadata,
+	// so this needs some manual formatting.
+	// Discard offsets after a release label and keep the labels down to e.g. `alpha.0` instead of
+	// including the offset e.g. `alpha.0.206`. This is done to comply with GCR image tags.
+	pre := v.PreRelease()
+	if len(pre) > 0 {
+		split := strings.Split(pre, ".")
+		if len(split) > 2 {
+			pre = split[0] + "." + split[1] // exclude the third element
+		} else if len(split) < 2 {
+			pre = split[0] + ".0" // append .0 to a partial label
+		}
+		pre = "-" + pre
+	}
+	vStr := fmt.Sprintf("v%d.%d.%d%s", v.Major(), v.Minor(), v.Patch(), pre)
+	return vStr, nil
 }
