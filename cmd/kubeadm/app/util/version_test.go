@@ -313,7 +313,7 @@ func TestKubeadmVersion(t *testing.T) {
 		{
 			name:   "valid patch version with label and extra metadata",
 			input:  "v1.11.3-beta.0.38+135cc4c1f47994",
-			output: "v1.11.3-beta.0",
+			output: "v1.11.2",
 		},
 		{
 			name:   "valid version with label extra",
@@ -323,7 +323,7 @@ func TestKubeadmVersion(t *testing.T) {
 		{
 			name:   "valid patch version with label",
 			input:  "v1.9.11-beta.0",
-			output: "v1.9.11-beta.0",
+			output: "v1.9.10",
 		},
 		{
 			name:   "handle version with partial label",

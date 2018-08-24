@@ -205,15 +205,21 @@ func kubeadmVersion(info string) (string, error) {
 	// Discard offsets after a release label and keep the labels down to e.g. `alpha.0` instead of
 	// including the offset e.g. `alpha.0.206`. This is done to comply with GCR image tags.
 	pre := v.PreRelease()
+	patch := v.Patch()
 	if len(pre) > 0 {
-		split := strings.Split(pre, ".")
-		if len(split) > 2 {
-			pre = split[0] + "." + split[1] // exclude the third element
-		} else if len(split) < 2 {
-			pre = split[0] + ".0" // append .0 to a partial label
+		if patch > 0 {
+			patch = patch - 1
+			pre = ""
+		} else {
+			split := strings.Split(pre, ".")
+			if len(split) > 2 {
+				pre = split[0] + "." + split[1] // exclude the third element
+			} else if len(split) < 2 {
+				pre = split[0] + ".0" // append .0 to a partial label
+			}
+			pre = "-" + pre
 		}
-		pre = "-" + pre
 	}
-	vStr := fmt.Sprintf("v%d.%d.%d%s", v.Major(), v.Minor(), v.Patch(), pre)
+	vStr := fmt.Sprintf("v%d.%d.%d%s", v.Major(), v.Minor(), patch, pre)
 	return vStr, nil
 }
