@@ -42,26 +42,6 @@ var (
 	kubeBucketPrefixes    = regexp.MustCompile(`^((release|ci|ci-cross)/)?([-\w_\.+]+)$`)
 )
 
-type status404Error struct {
-	message string
-}
-
-func (err status404Error) Error() string {
-	return err.message
-}
-
-func isStatus404Error(err error) bool {
-	if err == nil {
-		return false
-	}
-	switch err.(type) {
-	case status404Error:
-		return true
-	default:
-		return false
-	}
-}
-
 // KubernetesReleaseVersion is helper function that can fetch
 // available version information from release servers based on
 // label names, like "stable" or "latest".
@@ -101,7 +81,8 @@ func KubernetesReleaseVersion(version string) (string, error) {
 		url := fmt.Sprintf("%s/%s.txt", bucketURL, versionLabel)
 		body, err := fetchFromURL(url, getReleaseVersionTimeout)
 		if err != nil {
-			if !isStatus404Error(err) {
+			// If network operaton was successfull but server still replied with non-OK code
+			if body != "" {
 				return "", err
 			}
 			// Handle air-gapped environments by falling back to the client version.
@@ -179,19 +160,17 @@ func fetchFromURL(url string, timeout time.Duration) (string, error) {
 		return "", fmt.Errorf("unable to get URL %q: %s", url, err.Error())
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		msg := fmt.Sprintf("unable to fetch file. URL: %q, status: %v", url, resp.Status)
-		// do special handling for 404, as this means that the version file is missing on the server
-		if resp.StatusCode == http.StatusNotFound {
-			return "", status404Error{message: msg}
-		}
-		return "", errors.New(msg)
-	}
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("unable to read content of URL %q: %s", url, err.Error())
 	}
-	return strings.TrimSpace(string(body)), nil
+	bodyString := strings.TrimSpace(string(body))
+
+	if resp.StatusCode != http.StatusOK {
+		msg := fmt.Sprintf("unable to fetch file. URL: %q, status: %v", url, resp.Status)
+		return bodyString, errors.New(msg)
+	}
+	return bodyString, nil
 }
 
 // kubeadmVersion returns the version of the client without metadata.
