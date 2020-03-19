@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"text/template"
 
 	"github.com/lithammer/dedent"
@@ -127,6 +128,7 @@ type joinOptions struct {
 	controlPlane          bool
 	ignorePreflightErrors []string
 	externalcfg           *kubeadmapiv1beta2.JoinConfiguration
+	externalcfgCopy       *kubeadmapiv1beta2.JoinConfiguration
 	kustomizeDir          string
 }
 
@@ -297,11 +299,17 @@ func newJoinOptions() *joinOptions {
 	externalcfg.Discovery.BootstrapToken = &kubeadmapiv1beta2.BootstrapTokenDiscovery{}
 	externalcfg.ControlPlane = &kubeadmapiv1beta2.JoinControlPlane{}
 
+	// create a copy for comparison purposes
+	externalcfgCopy := &kubeadmapiv1beta2.JoinConfiguration{}
+	externalcfgCopy.ControlPlane = &kubeadmapiv1beta2.JoinControlPlane{}
+
 	// Apply defaults
 	kubeadmscheme.Scheme.Default(externalcfg)
+	kubeadmscheme.Scheme.Default(externalcfgCopy)
 
 	return &joinOptions{
-		externalcfg: externalcfg,
+		externalcfg:     externalcfg,
+		externalcfgCopy: externalcfgCopy,
 	}
 }
 
@@ -309,6 +317,12 @@ func newJoinOptions() *joinOptions {
 // This func takes care of validating joinOptions passed to the command, and then it converts
 // options into the internal JoinConfiguration type that is used as input all the phases in the kubeadm join workflow
 func newJoinData(cmd *cobra.Command, args []string, opt *joinOptions, out io.Writer) (*joinData, error) {
+
+	// validate that --config is not mixed with JoinControlPlane related and other flags
+	if err := validation.ValidateMixedArguments(cmd.Flags()); err != nil {
+		return nil, err
+	}
+
 	// Re-apply defaults to the public kubeadm API (this will set only values not exposed/not set as a flags)
 	kubeadmscheme.Scheme.Default(opt.externalcfg)
 
@@ -340,10 +354,14 @@ func newJoinData(cmd *cobra.Command, args []string, opt *joinOptions, out io.Wri
 		opt.externalcfg.Discovery.BootstrapToken.APIServerEndpoint = args[0]
 	}
 
-	// if not joining a control plane, unset the ControlPlane object
+	// check if the user passed the control-plane flag
 	if !opt.controlPlane {
-		if opt.externalcfg.ControlPlane != nil {
-			klog.Warningf("[preflight] WARNING: JoinControlPane.controlPlane settings will be ignored when %s flag is not set.", options.ControlPlane)
+		// at this point if the input configuration is different from the copy,
+		// it means the user has passed some control-plane related flags and populated
+		// the JoinControlPlane object. throw a warning that the --control-plane flag is required.
+		if !reflect.DeepEqual(opt.externalcfg.ControlPlane, opt.externalcfgCopy.ControlPlane) {
+			klog.Warningf("[preflight] WARNING: --%s is also required when passing control-plane related flags",
+				options.ControlPlane)
 		}
 		opt.externalcfg.ControlPlane = nil
 	}
@@ -359,10 +377,6 @@ func newJoinData(cmd *cobra.Command, args []string, opt *joinOptions, out io.Wri
 		if err != nil {
 			return nil, errors.Wrapf(err, "Error loading %s", adminKubeConfigPath)
 		}
-	}
-
-	if err := validation.ValidateMixedArguments(cmd.Flags()); err != nil {
-		return nil, err
 	}
 
 	// Either use the config file if specified, or convert public kubeadm API to the internal JoinConfiguration
