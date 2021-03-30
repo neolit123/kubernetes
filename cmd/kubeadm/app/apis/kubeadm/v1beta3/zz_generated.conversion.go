@@ -490,7 +490,6 @@ func Convert_kubeadm_ControlPlaneComponent_To_v1beta3_ControlPlaneComponent(in *
 }
 
 func autoConvert_v1beta3_DNS_To_kubeadm_DNS(in *DNS, out *kubeadm.DNS, s conversion.Scope) error {
-	out.Type = kubeadm.DNSAddOnType(in.Type)
 	if err := Convert_v1beta3_ImageMeta_To_kubeadm_ImageMeta(&in.ImageMeta, &out.ImageMeta, s); err != nil {
 		return err
 	}
@@ -503,7 +502,7 @@ func Convert_v1beta3_DNS_To_kubeadm_DNS(in *DNS, out *kubeadm.DNS, s conversion.
 }
 
 func autoConvert_kubeadm_DNS_To_v1beta3_DNS(in *kubeadm.DNS, out *DNS, s conversion.Scope) error {
-	out.Type = DNSAddOnType(in.Type)
+	// INFO: in.Type opted out of conversion generation
 	if err := Convert_kubeadm_ImageMeta_To_v1beta3_ImageMeta(&in.ImageMeta, &out.ImageMeta, s); err != nil {
 		return err
 	}

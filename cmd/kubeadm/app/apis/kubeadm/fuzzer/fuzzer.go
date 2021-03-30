@@ -31,7 +31,6 @@ func Funcs(codecs runtimeserializer.CodecFactory) []interface{} {
 		fuzzInitConfiguration,
 		fuzzClusterConfiguration,
 		fuzzComponentConfigMap,
-		fuzzDNS,
 		fuzzNodeRegistration,
 		fuzzLocalEtcd,
 		fuzzNetworking,
@@ -54,9 +53,6 @@ func fuzzInitConfiguration(obj *kubeadm.InitConfiguration, c fuzz.Continue) {
 			TimeoutForControlPlane: &metav1.Duration{
 				Duration: constants.DefaultControlPlaneTimeout,
 			},
-		},
-		DNS: kubeadm.DNS{
-			Type: kubeadm.CoreDNS,
 		},
 		CertificatesDir: v1beta2.DefaultCertificatesDir,
 		ClusterName:     v1beta2.DefaultClusterName,
@@ -104,13 +100,6 @@ func fuzzClusterConfiguration(obj *kubeadm.ClusterConfiguration, c fuzz.Continue
 	obj.APIServer.TimeoutForControlPlane = &metav1.Duration{
 		Duration: constants.DefaultControlPlaneTimeout,
 	}
-}
-
-func fuzzDNS(obj *kubeadm.DNS, c fuzz.Continue) {
-	c.FuzzNoCustom(obj)
-
-	// Pinning values for fields that get defaults if fuzz value is empty string or nil
-	obj.Type = kubeadm.CoreDNS
 }
 
 func fuzzComponentConfigMap(obj *kubeadm.ComponentConfigMap, c fuzz.Continue) {

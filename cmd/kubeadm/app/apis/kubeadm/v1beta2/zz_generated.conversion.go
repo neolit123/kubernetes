@@ -504,7 +504,7 @@ func Convert_v1beta2_DNS_To_kubeadm_DNS(in *DNS, out *kubeadm.DNS, s conversion.
 }
 
 func autoConvert_kubeadm_DNS_To_v1beta2_DNS(in *kubeadm.DNS, out *DNS, s conversion.Scope) error {
-	out.Type = DNSAddOnType(in.Type)
+	// INFO: in.Type opted out of conversion generation
 	if err := Convert_kubeadm_ImageMeta_To_v1beta2_ImageMeta(&in.ImageMeta, &out.ImageMeta, s); err != nil {
 		return err
 	}
