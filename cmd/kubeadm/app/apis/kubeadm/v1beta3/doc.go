@@ -22,12 +22,9 @@ limitations under the License.
 // Package v1beta3 defines the v1beta3 version of the kubeadm configuration file format.
 // This version improves on the v1beta1 format by fixing some minor issues and adding a few new fields.
 //
-// A list of changes since v1beta1:
-//	- "certificateKey" field is added to InitConfiguration and JoinConfiguration.
-//	- "ignorePreflightErrors" field is added to the NodeRegistrationOptions.
-//	- The JSON "omitempty" tag is used in a more places where appropriate.
-//	- The JSON "omitempty" tag of the "taints" field (inside NodeRegistrationOptions) is removed.
-//	See the Kubernetes 1.15 changelog for further details.
+// A list of changes since v1beta2:
+//	- ClusterConfiguration.UseHyperKubeImage has been removed.
+//	See the Kubernetes 1.22 changelog for further details.
 //
 // Migration from old kubeadm config versions
 //
@@ -241,7 +238,6 @@ limitations under the License.
 // 	    pathType: File
 // 	certificatesDir: "/etc/kubernetes/pki"
 // 	imageRepository: "k8s.gcr.io"
-// 	useHyperKubeImage: false
 // 	clusterName: "example-cluster"
 // 	---
 // 	apiVersion: kubelet.config.k8s.io/v1beta1

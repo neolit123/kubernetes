@@ -401,7 +401,6 @@ func autoConvert_v1beta3_ClusterConfiguration_To_kubeadm_ClusterConfiguration(in
 	}
 	out.CertificatesDir = in.CertificatesDir
 	out.ImageRepository = in.ImageRepository
-	out.UseHyperKubeImage = in.UseHyperKubeImage
 	out.FeatureGates = *(*map[string]bool)(unsafe.Pointer(&in.FeatureGates))
 	out.ClusterName = in.ClusterName
 	return nil
@@ -437,7 +436,7 @@ func autoConvert_kubeadm_ClusterConfiguration_To_v1beta3_ClusterConfiguration(in
 	out.CertificatesDir = in.CertificatesDir
 	out.ImageRepository = in.ImageRepository
 	// INFO: in.CIImageRepository opted out of conversion generation
-	out.UseHyperKubeImage = in.UseHyperKubeImage
+	// INFO: in.UseHyperKubeImage opted out of conversion generation
 	out.FeatureGates = *(*map[string]bool)(unsafe.Pointer(&in.FeatureGates))
 	out.ClusterName = in.ClusterName
 	return nil
