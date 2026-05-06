@@ -142,6 +142,13 @@ type CertificateSigningRequestSpec struct {
 	// Populated by the API server on creation and immutable.
 	// +optional
 	Extra map[string]ExtraValue `json:"extra,omitempty" protobuf:"bytes,6,rep,name=extra"`
+
+	// attestationRef, if set, is the name of the NodeAttestationDocument the kubelet
+	// submitted to prove its identity. The CSR approver uses this to locate and verify
+	// the attestation evidence before approving. NodeAttestationDocument is cluster-scoped.
+	// Only meaningful for kubelet client certificate CSRs.
+	// +optional
+	AttestationRef string `json:"attestationRef,omitempty"`
 }
 
 // Built in signerName values that are honored by kube-controller-manager.
@@ -155,6 +162,11 @@ const (
 	// Can be auto-approved by the "csrapproving" controller in kube-controller-manager.
 	// Can be issued by the "csrsigning" controller in kube-controller-manager.
 	KubeAPIServerClientKubeletSignerName = "kubernetes.io/kube-apiserver-client-kubelet"
+
+	// KubeAPIServerClientKubeletAttestedSignerName is the signer used for attested
+	// kubelet client certificate bootstrap. The CSR approver requires a valid
+	// NodeAttestationDocument to be present before approving.
+	KubeAPIServerClientKubeletAttestedSignerName = "kubernetes.io/kube-apiserver-client-kubelet-attested"
 
 	// "kubernetes.io/kubelet-serving" issues serving certificates that kubelets use to serve TLS endpoints,
 	// which kube-apiserver can connect to securely.

@@ -50,6 +50,7 @@ type InitData interface {
 	Client() (clientset.Interface, error)
 	Tokens() []string
 	PatchesDir() string
+	NodeAttestationPolicyDoc() []byte
 }
 
 // a package local type for testing purposes.
@@ -79,3 +80,4 @@ func (t *testInitData) OutputWriter() io.Writer                           { retu
 func (t *testInitData) Client() (clientset.Interface, error)              { return nil, nil }
 func (t *testInitData) Tokens() []string                                  { return nil }
 func (t *testInitData) PatchesDir() string                                { return "" }
+func (t *testInitData) NodeAttestationPolicyDoc() []byte                  { return nil }

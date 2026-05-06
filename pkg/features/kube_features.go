@@ -683,6 +683,15 @@ const (
 	// calculating pod topology spread skew.
 	NodeInclusionPolicyInPodTopologySpread featuregate.Feature = "NodeInclusionPolicyInPodTopologySpread"
 
+	// owner: @neolit123
+	// kep: https://kep.k8s.io/TODO
+	//
+	// Enables the NodeAttestation framework: attestation.kubernetes.io API group,
+	// built-in software (PSI) verifier in KCM, and attested CSR approval path.
+	// When disabled the API group is not registered and the kubelet falls back to
+	// the existing bootstrap-token CSR path.
+	NodeAttestation featuregate.Feature = "NodeAttestation"
+
 	// owner: @aravindhp @LorbusChris
 	// kep: http://kep.k8s.io/2271
 	//
@@ -1689,6 +1698,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.25"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.26"), Default: true, PreRelease: featuregate.Beta},
 		{Version: version.MustParse("1.33"), Default: true, PreRelease: featuregate.GA, LockToDefault: true},
+	},
+
+	NodeAttestation: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
 	NodeLogQuery: {

@@ -358,8 +358,10 @@ func documentMapToInitConfiguration(gvkmap kubeadmapi.DocumentMap, allowDeprecat
 			continue
 		}
 
-		// If the group is neither a kubeadm core type or of a supported component config group, we dump a warning about it being ignored
-		if !componentconfigs.Scheme.IsGroupRegistered(gvk.Group) {
+		// If the group is neither a kubeadm core type or of a supported component config group, we dump a warning about it being ignored.
+		// The attestation.kubernetes.io group is handled separately (applied to the cluster after the API server is ready),
+		// so it is silently passed through here.
+		if !componentconfigs.Scheme.IsGroupRegistered(gvk.Group) && gvk.Group != AttestationGroup {
 			klog.Warningf("[config] WARNING: Ignored configuration document with GroupVersionKind %v\n", gvk)
 		}
 	}

@@ -40,6 +40,8 @@ import (
 	fakeappsv1beta1 "k8s.io/client-go/kubernetes/typed/apps/v1beta1/fake"
 	appsv1beta2 "k8s.io/client-go/kubernetes/typed/apps/v1beta2"
 	fakeappsv1beta2 "k8s.io/client-go/kubernetes/typed/apps/v1beta2/fake"
+	attestationv1alpha1 "k8s.io/client-go/kubernetes/typed/attestation/v1alpha1"
+	fakeattestationv1alpha1 "k8s.io/client-go/kubernetes/typed/attestation/v1alpha1/fake"
 	authenticationv1 "k8s.io/client-go/kubernetes/typed/authentication/v1"
 	fakeauthenticationv1 "k8s.io/client-go/kubernetes/typed/authentication/v1/fake"
 	authenticationv1alpha1 "k8s.io/client-go/kubernetes/typed/authentication/v1alpha1"
@@ -328,6 +330,11 @@ func (c *Clientset) CertificatesV1() certificatesv1.CertificatesV1Interface {
 // CertificatesV1beta1 retrieves the CertificatesV1beta1Client
 func (c *Clientset) CertificatesV1beta1() certificatesv1beta1.CertificatesV1beta1Interface {
 	return &fakecertificatesv1beta1.FakeCertificatesV1beta1{Fake: &c.Fake}
+}
+
+// AttestationV1alpha1 retrieves the AttestationV1alpha1Client
+func (c *Clientset) AttestationV1alpha1() attestationv1alpha1.AttestationV1alpha1Interface {
+	return &fakeattestationv1alpha1.FakeAttestationV1alpha1{Fake: &c.Fake}
 }
 
 // CertificatesV1alpha1 retrieves the CertificatesV1alpha1Client

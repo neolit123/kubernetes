@@ -91,6 +91,7 @@ import (
 	authorizationrest "k8s.io/kubernetes/pkg/registry/authorization/rest"
 	autoscalingrest "k8s.io/kubernetes/pkg/registry/autoscaling/rest"
 	batchrest "k8s.io/kubernetes/pkg/registry/batch/rest"
+	attestationrest "k8s.io/kubernetes/pkg/registry/attestation/rest"
 	certificatesrest "k8s.io/kubernetes/pkg/registry/certificates/rest"
 	coordinationrest "k8s.io/kubernetes/pkg/registry/coordination/rest"
 	corerest "k8s.io/kubernetes/pkg/registry/core/rest"
@@ -441,6 +442,10 @@ func (c CompletedConfig) StorageProviders(client *kubernetes.Clientset) ([]contr
 			NamespaceClient: client.CoreV1().Namespaces(),
 			Authorizer:      c.ControlPlane.Generic.Authorization.Authorizer,
 		},
+	}
+
+	if utilfeature.DefaultFeatureGate.Enabled(features.NodeAttestation) {
+		providers = append(providers, attestationrest.StorageProvider{})
 	}
 
 	if AdditionalStorageProvidersForTests != nil {

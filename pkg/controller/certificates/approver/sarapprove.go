@@ -40,8 +40,9 @@ type csrRecognizer struct {
 }
 
 type sarApprover struct {
-	client      clientset.Interface
-	recognizers []csrRecognizer
+	client              clientset.Interface
+	recognizers         []csrRecognizer
+	attestationApprover *attestationApprover
 }
 
 // NewCSRApprovingController creates a new CSRApprovingController.
@@ -49,6 +50,29 @@ func NewCSRApprovingController(ctx context.Context, client clientset.Interface, 
 	approver := &sarApprover{
 		client:      client,
 		recognizers: recognizers(),
+	}
+	return certificates.NewCertificateController(
+		ctx,
+		"csrapproving",
+		client,
+		csrInformer,
+		approver.handle,
+	)
+}
+
+// NewCSRApprovingControllerWithAttestation creates a CSRApprovingController
+// that additionally verifies NodeAttestationDocuments for attested kubelet CSRs.
+// When aa is non-nil, attestation is enforced per NodeAttestationPolicy.
+func NewCSRApprovingControllerWithAttestation(
+	ctx context.Context,
+	client clientset.Interface,
+	csrInformer certificatesinformers.CertificateSigningRequestInformer,
+	aa *attestationApprover,
+) *certificates.CertificateController {
+	approver := &sarApprover{
+		client:              client,
+		recognizers:         recognizersWithAttestation(),
+		attestationApprover: aa,
 	}
 	return certificates.NewCertificateController(
 		ctx,
@@ -75,6 +99,17 @@ func recognizers() []csrRecognizer {
 	return recognizers
 }
 
+// recognizersWithAttestation returns the recognizer list extended with the
+// attested node client recognizer. Used when the NodeAttestation feature gate
+// is enabled.
+func recognizersWithAttestation() []csrRecognizer {
+	return append(recognizers(), csrRecognizer{
+		recognize:      isAttestedNodeClientCert,
+		permission:     authorization.ResourceAttributes{Group: "certificates.k8s.io", Resource: "certificatesigningrequests", Verb: "create", Subresource: "attestednodeclient", Version: "*"},
+		successMessage: "Auto approving kubelet client certificate after attestation verification.",
+	})
+}
+
 func (a *sarApprover) handle(ctx context.Context, csr *capi.CertificateSigningRequest) error {
 	if len(csr.Status.Certificate) != 0 {
 		return nil
@@ -82,6 +117,25 @@ func (a *sarApprover) handle(ctx context.Context, csr *capi.CertificateSigningRe
 	if approved, denied := certificates.GetCertApprovalCondition(&csr.Status); approved || denied {
 		return nil
 	}
+
+	// Attestation pre-check: when enabled, verify the attestation document
+	// (or enforce enrollment policy) before running the SAR loop.
+	if a.attestationApprover != nil {
+		if err := a.attestationApprover.HandleAttestedCSR(ctx, csr); err != nil {
+			if err == errRequeue {
+				// External verifier not yet done; requeue when doc status changes.
+				return nil
+			}
+			// Attestation failed — deny the CSR immediately.
+			appendDenyCondition(csr, fmt.Sprintf("AttestationFailed: %s", err.Error()))
+			_, updateErr := a.client.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, csr.Name, csr, metav1.UpdateOptions{})
+			if updateErr != nil {
+				return fmt.Errorf("error denying CSR after attestation failure: %w", updateErr)
+			}
+			return nil
+		}
+	}
+
 	x509cr, err := capihelper.ParseCSR(csr.Spec.Request)
 	if err != nil {
 		return fmt.Errorf("unable to parse csr %q: %v", csr.Name, err)
@@ -148,6 +202,15 @@ func appendApprovalCondition(csr *capi.CertificateSigningRequest, message string
 	})
 }
 
+func appendDenyCondition(csr *capi.CertificateSigningRequest, message string) {
+	csr.Status.Conditions = append(csr.Status.Conditions, capi.CertificateSigningRequestCondition{
+		Type:    capi.CertificateDenied,
+		Status:  corev1.ConditionTrue,
+		Reason:  "AutoDenied",
+		Message: message,
+	})
+}
+
 func isNodeClientCert(csr *capi.CertificateSigningRequest, x509cr *x509.CertificateRequest) bool {
 	if csr.Spec.SignerName != capi.KubeAPIServerClientKubeletSignerName {
 		return false
@@ -160,6 +223,18 @@ func isSelfNodeClientCert(csr *capi.CertificateSigningRequest, x509cr *x509.Cert
 		return false
 	}
 	return isNodeClientCert(csr, x509cr)
+}
+
+// isAttestedNodeClientCert recognizes attested kubelet client certificate CSRs:
+// those using the attested signer name and carrying an AttestationRef.
+func isAttestedNodeClientCert(csr *capi.CertificateSigningRequest, x509cr *x509.CertificateRequest) bool {
+	if csr.Spec.SignerName != capi.KubeAPIServerClientKubeletAttestedSignerName {
+		return false
+	}
+	if csr.Spec.AttestationRef == "" {
+		return false
+	}
+	return capihelper.IsKubeletClientCSR(x509cr, usagesToSet(csr.Spec.Usages))
 }
 
 func usagesToSet(usages []capi.KeyUsage) sets.String {

@@ -152,6 +152,12 @@ type KubeletConfiguration struct {
 	// certificate signing requests. The RotateKubeletServerCertificate feature
 	// must be enabled.
 	ServerTLSBootstrap bool
+	// nodeIdentityKeyFile is the path to the ECDSA P-256 or Ed25519 private key used
+	// for software node attestation during TLS bootstrap and certificate rotation.
+	// If unset, defaults to /var/lib/kubelet/pki/node-identity.key.
+	// If the file does not exist at bootstrap time, attestation is skipped and
+	// the legacy bootstrap-token CSR path is used (subject to server-side enforcement).
+	NodeIdentityKeyFile string
 	// authentication specifies how requests to the Kubelet's server are authenticated
 	Authentication KubeletAuthentication
 	// authorization specifies how requests to the Kubelet's server are authorized

@@ -44,6 +44,7 @@ import (
 	"k8s.io/kubernetes/cmd/kubeadm/app/features"
 	certsphase "k8s.io/kubernetes/cmd/kubeadm/app/phases/certs"
 	kubeconfigphase "k8s.io/kubernetes/cmd/kubeadm/app/phases/kubeconfig"
+	kubeadmutil "k8s.io/kubernetes/cmd/kubeadm/app/util"
 	"k8s.io/kubernetes/cmd/kubeadm/app/util/apiclient"
 	configutil "k8s.io/kubernetes/cmd/kubeadm/app/util/config"
 	"k8s.io/kubernetes/cmd/kubeadm/app/util/errors"
@@ -104,6 +105,7 @@ type initData struct {
 	skipCertificateKeyPrint     bool
 	patchesDir                  string
 	adminKubeConfigBootstrapped bool
+	nodeAttestationPolicyDoc    []byte
 }
 
 // newCmdInit returns "kubeadm init" command.
@@ -333,6 +335,20 @@ func newInitData(cmd *cobra.Command, args []string, initOptions *initOptions, ou
 		return nil, err
 	}
 
+	// Extract the NodeAttestationPolicy document from the config file (if any).
+	// This is done separately because the policy is a CRD-backed resource applied
+	// after the API server is healthy, not part of kubeadm's own config types.
+	var nodeAttestationPolicyDoc []byte
+	if initOptions.cfgPath != "" {
+		rawCfg, err := os.ReadFile(initOptions.cfgPath)
+		if err == nil {
+			gvkmap, err := kubeadmutil.SplitConfigDocuments(rawCfg)
+			if err == nil {
+				nodeAttestationPolicyDoc = configutil.ExtractAttestationPolicyDoc(gvkmap)
+			}
+		}
+	}
+
 	ignorePreflightErrorsSet, err := validation.ValidateIgnorePreflightErrors(initOptions.ignorePreflightErrors, cfg.NodeRegistration.IgnorePreflightErrors)
 	if err != nil {
 		return nil, err
@@ -392,19 +408,20 @@ func newInitData(cmd *cobra.Command, args []string, initOptions *initOptions, ou
 	}
 
 	return &initData{
-		cfg:                     cfg,
-		certificatesDir:         cfg.CertificatesDir,
-		skipTokenPrint:          initOptions.skipTokenPrint,
-		dryRun:                  cmdutil.ValueFromFlagsOrConfig(cmd.Flags(), options.DryRun, cfg.DryRun, initOptions.dryRun).(bool),
-		dryRunDir:               dryRunDir,
-		kubeconfigDir:           initOptions.kubeconfigDir,
-		kubeconfigPath:          initOptions.kubeconfigPath,
-		ignorePreflightErrors:   ignorePreflightErrorsSet,
-		externalCA:              externalCA,
-		outputWriter:            out,
-		uploadCerts:             initOptions.uploadCerts,
-		skipCertificateKeyPrint: initOptions.skipCertificateKeyPrint,
-		patchesDir:              initOptions.patchesDir,
+		cfg:                      cfg,
+		certificatesDir:          cfg.CertificatesDir,
+		skipTokenPrint:           initOptions.skipTokenPrint,
+		dryRun:                   cmdutil.ValueFromFlagsOrConfig(cmd.Flags(), options.DryRun, cfg.DryRun, initOptions.dryRun).(bool),
+		dryRunDir:                dryRunDir,
+		kubeconfigDir:            initOptions.kubeconfigDir,
+		kubeconfigPath:           initOptions.kubeconfigPath,
+		ignorePreflightErrors:    ignorePreflightErrorsSet,
+		externalCA:               externalCA,
+		outputWriter:             out,
+		uploadCerts:              initOptions.uploadCerts,
+		skipCertificateKeyPrint:  initOptions.skipCertificateKeyPrint,
+		patchesDir:               initOptions.patchesDir,
+		nodeAttestationPolicyDoc: nodeAttestationPolicyDoc,
 	}, nil
 }
 
@@ -616,6 +633,12 @@ func (d *initData) PatchesDir() string {
 		return d.cfg.Patches.Directory
 	}
 	return ""
+}
+
+// NodeAttestationPolicyDoc returns the raw YAML bytes of the NodeAttestationPolicy
+// document found in the kubeadm config file, or nil if none was provided.
+func (d *initData) NodeAttestationPolicyDoc() []byte {
+	return d.nodeAttestationPolicyDoc
 }
 
 // manageSkippedAddons syncs proxy and DNS "Disabled" status and skipPhases.

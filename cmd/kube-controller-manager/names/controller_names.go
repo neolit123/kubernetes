@@ -63,6 +63,7 @@ const (
 	CertificateSigningRequestApprovingController       = "certificatesigningrequest-approving-controller"
 	CertificateSigningRequestCleanerController         = "certificatesigningrequest-cleaner-controller"
 	PodCertificateRequestCleanerController             = "podcertificaterequest-cleaner-controller"
+	AttestationCleanerController                       = "attestation-cleaner-controller"
 	TTLController                                      = "ttl-controller"
 	BootstrapSignerController                          = "bootstrap-signer-controller"
 	TokenCleanerController                             = "token-cleaner-controller"

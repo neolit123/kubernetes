@@ -221,6 +221,13 @@ type KubeletConfiguration struct {
 	// Default: false
 	// +optional
 	ServerTLSBootstrap bool `json:"serverTLSBootstrap,omitempty"`
+	// nodeIdentityKeyFile is the path to the ECDSA P-256 or Ed25519 private key used
+	// for software node attestation during TLS bootstrap and certificate rotation.
+	// If unset, defaults to /var/lib/kubelet/pki/node-identity.key.
+	// If the file does not exist at bootstrap time, attestation is skipped and
+	// the legacy bootstrap-token CSR path is used (subject to server-side enforcement).
+	// +optional
+	NodeIdentityKeyFile string `json:"nodeIdentityKeyFile,omitempty"`
 	// authentication specifies how requests to the Kubelet's server are authenticated.
 	// Defaults:
 	//   anonymous:

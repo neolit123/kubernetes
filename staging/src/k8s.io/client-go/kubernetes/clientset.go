@@ -30,6 +30,7 @@ import (
 	appsv1 "k8s.io/client-go/kubernetes/typed/apps/v1"
 	appsv1beta1 "k8s.io/client-go/kubernetes/typed/apps/v1beta1"
 	appsv1beta2 "k8s.io/client-go/kubernetes/typed/apps/v1beta2"
+	attestationv1alpha1 "k8s.io/client-go/kubernetes/typed/attestation/v1alpha1"
 	authenticationv1 "k8s.io/client-go/kubernetes/typed/authentication/v1"
 	authenticationv1alpha1 "k8s.io/client-go/kubernetes/typed/authentication/v1alpha1"
 	authenticationv1beta1 "k8s.io/client-go/kubernetes/typed/authentication/v1beta1"
@@ -96,6 +97,7 @@ type Interface interface {
 	AuthorizationV1beta1() authorizationv1beta1.AuthorizationV1beta1Interface
 	AutoscalingV1() autoscalingv1.AutoscalingV1Interface
 	AutoscalingV2() autoscalingv2.AutoscalingV2Interface
+	AttestationV1alpha1() attestationv1alpha1.AttestationV1alpha1Interface
 	BatchV1() batchv1.BatchV1Interface
 	BatchV1beta1() batchv1beta1.BatchV1beta1Interface
 	CertificatesV1() certificatesv1.CertificatesV1Interface
@@ -155,6 +157,7 @@ type Clientset struct {
 	autoscalingV1                 *autoscalingv1.AutoscalingV1Client
 	autoscalingV2                 *autoscalingv2.AutoscalingV2Client
 	batchV1                       *batchv1.BatchV1Client
+	attestationV1alpha1           *attestationv1alpha1.AttestationV1alpha1Client
 	batchV1beta1                  *batchv1beta1.BatchV1beta1Client
 	certificatesV1                *certificatesv1.CertificatesV1Client
 	certificatesV1beta1           *certificatesv1beta1.CertificatesV1beta1Client
@@ -283,6 +286,11 @@ func (c *Clientset) CertificatesV1() certificatesv1.CertificatesV1Interface {
 // CertificatesV1beta1 retrieves the CertificatesV1beta1Client
 func (c *Clientset) CertificatesV1beta1() certificatesv1beta1.CertificatesV1beta1Interface {
 	return c.certificatesV1beta1
+}
+
+// AttestationV1alpha1 retrieves the AttestationV1alpha1Client
+func (c *Clientset) AttestationV1alpha1() attestationv1alpha1.AttestationV1alpha1Interface {
+	return c.attestationV1alpha1
 }
 
 // CertificatesV1alpha1 retrieves the CertificatesV1alpha1Client
@@ -572,6 +580,10 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 	if err != nil {
 		return nil, err
 	}
+	cs.attestationV1alpha1, err = attestationv1alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
+	if err != nil {
+		return nil, err
+	}
 	cs.certificatesV1beta1, err = certificatesv1beta1.NewForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
 		return nil, err
@@ -751,6 +763,7 @@ func New(c rest.Interface) *Clientset {
 	cs.authorizationV1beta1 = authorizationv1beta1.New(c)
 	cs.autoscalingV1 = autoscalingv1.New(c)
 	cs.autoscalingV2 = autoscalingv2.New(c)
+	cs.attestationV1alpha1 = attestationv1alpha1.New(c)
 	cs.batchV1 = batchv1.New(c)
 	cs.batchV1beta1 = batchv1beta1.New(c)
 	cs.certificatesV1 = certificatesv1.New(c)

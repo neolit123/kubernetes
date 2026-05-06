@@ -114,6 +114,13 @@ type CertificateSigningRequestSpec struct {
 	// See user.Info interface for details.
 	// +optional
 	Extra map[string]ExtraValue
+
+	// AttestationRef, if set, is the name of the NodeAttestationDocument the kubelet
+	// submitted to prove its identity. The CSR approver uses this to locate and verify
+	// the attestation evidence before approving. NodeAttestationDocument is cluster-scoped.
+	// Only meaningful for kubelet client certificate CSRs.
+	// +optional
+	AttestationRef string
 }
 
 // Built in signerName values that are honoured by kube-controller-manager.

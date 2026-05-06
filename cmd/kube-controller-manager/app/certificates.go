@@ -24,11 +24,14 @@ import (
 	"fmt"
 	"time"
 
+	attestationv1alpha1 "k8s.io/api/attestation/v1alpha1"
 	certificatesv1alpha1 "k8s.io/api/certificates/v1alpha1"
 	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/server/dynamiccertificates"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/component-base/featuregate"
 	"k8s.io/klog/v2"
@@ -197,11 +200,35 @@ func newCertificateSigningRequestApprovingController(ctx context.Context, contro
 		return nil, err
 	}
 
-	ac := approver.NewCSRApprovingController(
-		ctx,
-		client,
-		controllerContext.InformerFactory.Certificates().V1().CertificateSigningRequests(),
-	)
+	var ac interface{ Run(context.Context, int) }
+
+	if utilfeature.DefaultFeatureGate.Enabled(features.NodeAttestation) {
+		// Fetch NodeAttestationPolicy from the cluster (best-effort; nil policy means permissive defaults).
+		var policy *attestationv1alpha1.NodeAttestationPolicySpec
+		if p, err := client.AttestationV1alpha1().NodeAttestationPolicies().Get(ctx, "cluster", metav1.GetOptions{}); err == nil {
+			policy = &p.Spec
+		}
+		registry := approver.NewAttestationVerifierRegistry(client, func() *attestationv1alpha1.SoftwareAttestationPolicy {
+			if policy != nil {
+				return policy.SoftwarePolicy
+			}
+			return nil
+		}())
+		aa := approver.NewAttestationCSRApprovingController(ctx, client, policy, registry)
+		ac = approver.NewCSRApprovingControllerWithAttestation(
+			ctx,
+			client,
+			controllerContext.InformerFactory.Certificates().V1().CertificateSigningRequests(),
+			aa,
+		)
+	} else {
+		ac = approver.NewCSRApprovingController(
+			ctx,
+			client,
+			controllerContext.InformerFactory.Certificates().V1().CertificateSigningRequests(),
+		)
+	}
+
 	return newControllerLoop(func(ctx context.Context) {
 		ac.Run(ctx, 5)
 	}, controllerName), nil
