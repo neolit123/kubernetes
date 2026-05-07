@@ -99,6 +99,11 @@ type NodeIdentityEnrollmentSpec struct {
 	// BootstrapExpiry is the deadline for the node's first successful bootstrap.
 	// +optional
 	BootstrapExpiry *metav1.Time
+
+	// ExpectedNodeIP is the IP address the node is expected to bootstrap from.
+	// When set, the verifier rejects documents whose JWS node_ip claim differs.
+	// +optional
+	ExpectedNodeIP string
 }
 
 // SoftwareIdentitySpec holds the provisioned public key for PSI attestation.
@@ -120,10 +125,6 @@ type NodeMeasurements struct {
 	// KubeletHash is the SHA-256 hex digest of the kubelet binary.
 	KubeletHash string
 
-	// ContainerRuntimeHash is the SHA-256 hex digest of the CRI binary.
-	// +optional
-	ContainerRuntimeHash string
-
 	// OSImageID is the cloud/OS image identifier from which this node was booted.
 	// +optional
 	OSImageID string
@@ -132,18 +133,10 @@ type NodeMeasurements struct {
 	// +optional
 	KernelVersion string
 
-	// IMALog is a subset of the Linux IMA measurement log (ASCII format).
-	// +optional
-	IMALog []byte
-
 	// SLSAProvenanceURI is a reference to an OCI artifact or Rekor entry
 	// containing SLSA provenance for the kubelet binary.
 	// +optional
 	SLSAProvenanceURI string
-
-	// Extensions holds platform-specific measurements in reverse-DNS key format.
-	// +optional
-	Extensions map[string]string
 }
 
 // NodeIdentityEnrollmentStatus reflects the current lifecycle phase of an enrollment.

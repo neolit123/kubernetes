@@ -35,6 +35,10 @@ type AttestationConfig struct {
 	NodeIdentityKeyFile string
 	// NodeName is the node name the kubelet will register with.
 	NodeName string
+	// NodeIP is the primary IP address of the node (from --node-ip or auto-detected).
+	// When set, it is embedded in the JWS as a node_ip claim so the server can
+	// optionally enforce that enrollment.ExpectedNodeIP matches.
+	NodeIP string
 }
 
 func (c *AttestationConfig) keyFile() string {
@@ -92,7 +96,7 @@ func PerformAttestation(ctx context.Context, client clientset.Interface, cfg Att
 	}
 
 	// Sign the JWS payload.
-	signedPayload, err := signAttestationPayload(privKey, cfg.NodeName, challenge.Status.Nonce, measHash)
+	signedPayload, err := signAttestationPayload(privKey, cfg.NodeName, cfg.NodeIP, challenge.Status.Nonce, measHash)
 	if err != nil {
 		return nil, fmt.Errorf("attestation: failed to sign payload: %w", err)
 	}
@@ -262,7 +266,7 @@ func requestChallenge(ctx context.Context, client clientset.Interface, nodeName 
 }
 
 // signAttestationPayload builds and signs the compact JWS for a NodeAttestationDocument.
-func signAttestationPayload(priv *ecdsa.PrivateKey, nodeName, nonce, measHash string) (string, error) {
+func signAttestationPayload(priv *ecdsa.PrivateKey, nodeName, nodeIP, nonce, measHash string) (string, error) {
 	now := time.Now()
 	claims := map[string]interface{}{
 		"iss":               "kubernetes.io/node-identity/v1alpha1",
@@ -271,6 +275,9 @@ func signAttestationPayload(priv *ecdsa.PrivateKey, nodeName, nonce, measHash st
 		"exp":               now.Add(10 * time.Minute).Unix(),
 		"nonce":             nonce,
 		"measurements_hash": measHash,
+	}
+	if nodeIP != "" {
+		claims["node_ip"] = nodeIP
 	}
 
 	payload, err := json.Marshal(claims)
@@ -310,7 +317,7 @@ func submitDocument(
 			ChallengeRef:    challengeName,
 			AttestationMode: attestationv1alpha1.AttestationModeSoftware,
 			Measurements:    measurements,
-			SignedPayload:    signedPayload,
+			SignedPayload:   signedPayload,
 		},
 	}
 	created, err := client.AttestationV1alpha1().

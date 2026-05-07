@@ -150,10 +150,9 @@ func TestVerifyJWSAndExtractClaims_WrongIssuer(t *testing.T) {
 
 func TestMeasurementsHash_Deterministic(t *testing.T) {
 	m := attestationv1alpha1.NodeMeasurements{
-		KubeletHash:          "deadbeef",
-		ContainerRuntimeHash: "cafebabe",
-		OSImageID:            "ami-12345",
-		KernelVersion:        "6.1.0",
+		KubeletHash:   "deadbeef",
+		OSImageID:     "ami-12345",
+		KernelVersion: "6.1.0",
 	}
 
 	h1, err := measurementsHash(m)
@@ -182,14 +181,12 @@ func TestMeasurementsHash_DistinctForDifferentMeasurements(t *testing.T) {
 
 func TestVerifyMeasurements_Match(t *testing.T) {
 	reported := attestationv1alpha1.NodeMeasurements{
-		KubeletHash:          "abc",
-		ContainerRuntimeHash: "def",
-		OSImageID:            "ami-1",
+		KubeletHash: "abc",
+		OSImageID:   "ami-1",
 	}
 	expected := attestationv1alpha1.NodeMeasurements{
-		KubeletHash:          "abc",
-		ContainerRuntimeHash: "def",
-		OSImageID:            "ami-1",
+		KubeletHash: "abc",
+		OSImageID:   "ami-1",
 	}
 	if err := verifyMeasurements(reported, expected, nil); err != nil {
 		t.Errorf("expected match, got error: %v", err)

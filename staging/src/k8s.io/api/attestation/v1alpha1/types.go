@@ -107,6 +107,13 @@ type NodeIdentityEnrollmentSpec struct {
 	// this field is ignored — Active enrollments persist for the Node lifetime.
 	// +optional
 	BootstrapExpiry *metav1.Time `json:"bootstrapExpiry,omitempty"`
+
+	// expectedNodeIP is the IP address the node is expected to bootstrap from.
+	// When set, the verifier rejects attestation documents whose signed payload
+	// carries a different node_ip claim. Protects against cross-node replay of
+	// stolen attestation documents.
+	// +optional
+	ExpectedNodeIP string `json:"expectedNodeIP,omitempty"`
 }
 
 // SoftwareIdentitySpec holds the provisioned public key for PSI attestation.
@@ -139,10 +146,6 @@ type NodeMeasurements struct {
 	// kubeletHash is the SHA-256 hex digest of the kubelet binary (sha256sum /proc/self/exe).
 	KubeletHash string `json:"kubeletHash"`
 
-	// containerRuntimeHash is the SHA-256 hex digest of the CRI binary.
-	// +optional
-	ContainerRuntimeHash string `json:"containerRuntimeHash,omitempty"`
-
 	// osImageID is the cloud/OS image identifier from which this node was booted.
 	// Examples: AMI ID, GCE image name, cloud-init image hash.
 	// +optional
@@ -152,22 +155,11 @@ type NodeMeasurements struct {
 	// +optional
 	KernelVersion string `json:"kernelVersion,omitempty"`
 
-	// imaLog is a subset of the Linux IMA measurement log (ASCII format).
-	// Present only if IMA is enabled on the node.
-	// +optional
-	// +kubebuilder:validation:MaxLength=1048576
-	IMALog []byte `json:"imaLog,omitempty"`
-
 	// slsaProvenanceURI is a reference to an OCI artifact or Rekor entry
 	// containing SLSA provenance for the kubelet binary.
 	// Must match an entry in NodeAttestationPolicy.SoftwarePolicy.SLSAProvenanceAllowedPrefixes.
 	// +optional
 	SLSAProvenanceURI string `json:"slsaProvenanceURI,omitempty"`
-
-	// extensions holds platform-specific measurements in reverse-DNS key format.
-	// Hardware verifiers use this map to carry platform evidence (TPM quotes, etc.).
-	// +optional
-	Extensions map[string]string `json:"extensions,omitempty"`
 }
 
 // NodeIdentityEnrollmentStatus reflects the current lifecycle phase of an enrollment.

@@ -17,9 +17,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
+	attestationv1alpha1 "k8s.io/api/attestation/v1alpha1"
 	capi "k8s.io/api/certificates/v1"
 	clientset "k8s.io/client-go/kubernetes"
-	attestationv1alpha1 "k8s.io/api/attestation/v1alpha1"
 )
 
 const (
@@ -76,6 +76,7 @@ type jwsClaims struct {
 	ExpiresAt        int64  `json:"exp"`
 	Nonce            string `json:"nonce"`
 	MeasurementsHash string `json:"measurements_hash"`
+	NodeIP           string `json:"node_ip,omitempty"`
 }
 
 // softwareAttestationVerifier is the built-in PSI verifier.
@@ -144,6 +145,17 @@ func (v *softwareAttestationVerifier) Verify(
 	if derr := v.client.AttestationV1alpha1().
 		NodeAttestationChallenges().Delete(ctx, challenge.Name, metav1.DeleteOptions{}); derr != nil {
 		klog.Warningf("attestation: failed to delete used challenge %s: %v", challenge.Name, derr)
+	}
+
+	// 5a. Verify node_ip binding if the enrollment specifies an expected IP.
+	if enrollment.Spec.ExpectedNodeIP != "" {
+		if claims.NodeIP == "" {
+			return fmt.Errorf("enrollment requires node_ip claim but signed payload contains none")
+		}
+		if claims.NodeIP != enrollment.Spec.ExpectedNodeIP {
+			return fmt.Errorf("node_ip mismatch: enrollment expects %q but JWS claims %q",
+				enrollment.Spec.ExpectedNodeIP, claims.NodeIP)
+		}
 	}
 
 	// 6. Cross-check measurements_hash binding.
@@ -240,7 +252,6 @@ func verifyJWSAndExtractClaims(compactJWS, pemPublicKey string) (*jwsClaims, err
 	return &claims, nil
 }
 
-
 // measurementsHash returns the hex-encoded SHA-256 of the canonical JSON encoding
 // of the NodeMeasurements struct. This is the value the JWS measurements_hash claim
 // must equal.
@@ -267,13 +278,13 @@ func verifyMeasurements(
 		return fmt.Errorf("kubelet hash mismatch: expected %s got %s",
 			expected.KubeletHash, reported.KubeletHash)
 	}
-	if expected.ContainerRuntimeHash != "" && reported.ContainerRuntimeHash != expected.ContainerRuntimeHash {
-		return fmt.Errorf("container runtime hash mismatch: expected %s got %s",
-			expected.ContainerRuntimeHash, reported.ContainerRuntimeHash)
-	}
 	if expected.OSImageID != "" && reported.OSImageID != expected.OSImageID {
 		return fmt.Errorf("OS image ID mismatch: expected %s got %s",
 			expected.OSImageID, reported.OSImageID)
+	}
+	if expected.KernelVersion != "" && reported.KernelVersion != expected.KernelVersion {
+		return fmt.Errorf("kernel version mismatch: expected %s got %s",
+			expected.KernelVersion, reported.KernelVersion)
 	}
 	return nil
 }
