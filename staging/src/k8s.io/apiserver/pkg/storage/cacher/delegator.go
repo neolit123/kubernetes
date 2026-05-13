@@ -40,6 +40,7 @@ import (
 	"k8s.io/apiserver/pkg/storage/cacher/delegator"
 	"k8s.io/apiserver/pkg/storage/cacher/metrics"
 	"k8s.io/apiserver/pkg/storage/cacher/store"
+	"k8s.io/apiserver/pkg/storage/storagebackend"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/component-base/tracing"
 	"k8s.io/klog/v2"
@@ -66,7 +67,7 @@ func NewCacheDelegator(cacher *Cacher, storage storage.Interface) *CacheDelegato
 		stopCh:  make(chan struct{}),
 	}
 	if utilfeature.DefaultFeatureGate.Enabled(features.DetectCacheInconsistency) || panicOnCacheInconsistency {
-		d.checker = newConsistencyChecker(cacher.resourcePrefix, cacher.groupResource, cacher.newListFunc, cacher, storage)
+		d.checker = newConsistencyChecker(cacher.resourcePrefix, cacher.groupResource, cacher.newListFunc, cacher, storage, cacher.kcpExtraStorageMetadata)
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
@@ -287,20 +288,22 @@ func (c *CacheDelegator) Stop() {
 	c.wg.Wait()
 }
 
-func newConsistencyChecker(resourcePrefix string, groupResource schema.GroupResource, newListFunc func() runtime.Object, cacher cacher, etcd getLister) *consistencyChecker {
+func newConsistencyChecker(resourcePrefix string, groupResource schema.GroupResource, newListFunc func() runtime.Object, cacher cacher, etcd getLister, kcpStorageMetadata *storagebackend.KcpStorageMetadata) *consistencyChecker {
 	return &consistencyChecker{
-		groupResource:  groupResource,
-		resourcePrefix: resourcePrefix,
-		newListFunc:    newListFunc,
-		cacher:         cacher,
-		etcd:           etcd,
+		groupResource:      groupResource,
+		resourcePrefix:     resourcePrefix,
+		newListFunc:        newListFunc,
+		cacher:             cacher,
+		etcd:               etcd,
+		kcpStorageMetadata: kcpStorageMetadata,
 	}
 }
 
 type consistencyChecker struct {
-	resourcePrefix string
-	groupResource  schema.GroupResource
-	newListFunc    func() runtime.Object
+	resourcePrefix     string
+	groupResource      schema.GroupResource
+	newListFunc        func() runtime.Object
+	kcpStorageMetadata *storagebackend.KcpStorageMetadata
 
 	cacher cacher
 	etcd   getLister
@@ -329,6 +332,7 @@ func (c consistencyChecker) startChecking(stopCh <-chan struct{}) {
 }
 
 func (c *consistencyChecker) check(ctx context.Context) {
+	ctx = createKCPClusterAwareContext(ctx, c.kcpStorageMetadata)
 	digests, err := c.calculateDigests(ctx)
 	if err != nil {
 		klog.ErrorS(err, "Cache consistency check error", "group", c.groupResource.Group, "resource", c.groupResource.Resource)

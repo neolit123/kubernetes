@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kcp-dev/logicalcluster/v3"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -116,6 +117,10 @@ func (t *Tester) SetUserInfo(userInfo user.Info) {
 	t.userInfo = userInfo
 }
 
+func (t *Tester) TestCluster() logicalcluster.Name {
+	return logicalcluster.New("root")
+}
+
 // TestContext returns a namespaced context that will be used when making storage calls.
 // Namespace is determined by TestNamespace()
 func (t *Tester) TestContext() context.Context {
@@ -127,7 +132,7 @@ func (t *Tester) TestContext() context.Context {
 	if t.requestInfo != nil {
 		ctx = genericapirequest.WithRequestInfo(ctx, t.requestInfo)
 	}
-	return ctx
+	return genericapirequest.WithCluster(genericapirequest.WithNamespace(ctx, t.TestNamespace()), genericapirequest.Cluster{Name: t.TestCluster()})
 }
 
 func (t *Tester) getObjectMetaOrFail(obj runtime.Object) metav1.Object {
@@ -336,6 +341,7 @@ func (t *Tester) testCreateDryRunEquals(obj runtime.Object) {
 	createdFakeMeta.SetResourceVersion("")
 	createdMeta.SetResourceVersion("")
 	createdMeta.SetUID(createdFakeMeta.GetUID())
+	createdMeta.SetZZZ_DeprecatedClusterName(createdFakeMeta.GetZZZ_DeprecatedClusterName())
 
 	if e, a := created, createdFake; !apiequality.Semantic.DeepEqual(e, a) {
 		t.Errorf("unexpected obj: %#v, expected %#v", e, a)
@@ -363,6 +369,7 @@ func (t *Tester) testCreateEquals(obj runtime.Object, getFn GetFunc) {
 	createdMeta := t.getObjectMetaOrFail(created)
 	gotMeta := t.getObjectMetaOrFail(got)
 	createdMeta.SetResourceVersion(gotMeta.GetResourceVersion())
+	createdMeta.SetZZZ_DeprecatedClusterName(gotMeta.GetZZZ_DeprecatedClusterName())
 
 	if e, a := created, got; !apiequality.Semantic.DeepEqual(e, a) {
 		t.Errorf("unexpected obj: %#v, expected %#v", e, a)
@@ -425,6 +432,7 @@ func (t *Tester) testCreateHasMetadata(valid runtime.Object) {
 func (t *Tester) testCreateIgnoresContextNamespace(valid runtime.Object, opts metav1.CreateOptions) {
 	// Ignore non-empty namespace in context
 	ctx := genericapirequest.WithNamespace(genericapirequest.NewContext(), "not-default2")
+	ctx = genericapirequest.WithNamespace(genericapirequest.WithCluster(ctx, genericapirequest.Cluster{Name: t.TestCluster()}), "not-default2")
 	if t.requestInfo != nil {
 		ctx = genericapirequest.WithRequestInfo(ctx, t.requestInfo)
 	}
@@ -447,6 +455,7 @@ func (t *Tester) testCreateIgnoresMismatchedNamespace(valid runtime.Object, opts
 	// Ignore non-empty namespace in object meta
 	objectMeta.SetNamespace("not-default")
 	ctx := genericapirequest.WithNamespace(genericapirequest.NewContext(), "not-default2")
+	ctx = genericapirequest.WithNamespace(genericapirequest.WithCluster(ctx, genericapirequest.Cluster{Name: t.TestCluster()}), "not-default2")
 	if t.requestInfo != nil {
 		ctx = genericapirequest.WithRequestInfo(ctx, t.requestInfo)
 	}
@@ -1195,6 +1204,7 @@ func (t *Tester) testGetDifferentNamespace(obj runtime.Object) {
 	objMeta.SetName(t.namer(5))
 
 	ctx1 := genericapirequest.WithNamespace(genericapirequest.NewContext(), "bar3")
+	ctx1 = genericapirequest.WithNamespace(genericapirequest.WithCluster(ctx1, genericapirequest.Cluster{Name: t.TestCluster()}), "bar3")
 	if t.requestInfo != nil {
 		ctx1 = genericapirequest.WithRequestInfo(ctx1, t.requestInfo)
 	}
@@ -1205,6 +1215,7 @@ func (t *Tester) testGetDifferentNamespace(obj runtime.Object) {
 	}
 
 	ctx2 := genericapirequest.WithNamespace(genericapirequest.NewContext(), "bar4")
+	ctx2 = genericapirequest.WithNamespace(genericapirequest.WithCluster(ctx2, genericapirequest.Cluster{Name: t.TestCluster()}), "bar4")
 	if t.requestInfo != nil {
 		ctx2 = genericapirequest.WithRequestInfo(ctx2, t.requestInfo)
 	}
@@ -1262,10 +1273,12 @@ func (t *Tester) testGetFound(obj runtime.Object) {
 
 func (t *Tester) testGetMimatchedNamespace(obj runtime.Object) {
 	ctx1 := genericapirequest.WithNamespace(genericapirequest.NewContext(), "bar1")
+	ctx1 = genericapirequest.WithNamespace(genericapirequest.WithCluster(ctx1, genericapirequest.Cluster{Name: t.TestCluster()}), "bar1")
 	if t.requestInfo != nil {
 		ctx1 = genericapirequest.WithRequestInfo(ctx1, t.requestInfo)
 	}
 	ctx2 := genericapirequest.WithNamespace(genericapirequest.NewContext(), "bar2")
+	ctx2 = genericapirequest.WithNamespace(genericapirequest.WithCluster(ctx2, genericapirequest.Cluster{Name: t.TestCluster()}), "bar2")
 	if t.requestInfo != nil {
 		ctx2 = genericapirequest.WithRequestInfo(ctx2, t.requestInfo)
 	}
@@ -1361,7 +1374,7 @@ func (t *Tester) testListMatchLabels(obj runtime.Object, assignFn AssignFunc) {
 	foo4Meta.SetNamespace(genericapirequest.NamespaceValue(ctx))
 	foo4Meta.SetLabels(testLabels)
 
-	objs := ([]runtime.Object{foo3, foo4})
+	objs := []runtime.Object{foo3, foo4}
 
 	assignFn(objs)
 	filtered := []runtime.Object{objs[1]}
@@ -1415,7 +1428,7 @@ func (t *Tester) testListTableConversion(obj runtime.Object, assignFn AssignFunc
 	foo4Meta.SetNamespace(genericapirequest.NamespaceValue(ctx))
 	foo4Meta.SetLabels(testLabels)
 
-	objs := ([]runtime.Object{foo3, foo4})
+	objs := []runtime.Object{foo3, foo4}
 
 	assignFn(objs)
 

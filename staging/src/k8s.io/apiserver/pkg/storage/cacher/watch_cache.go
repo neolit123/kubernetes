@@ -103,7 +103,7 @@ type watchCache struct {
 	lowerBoundCapacity int
 
 	// keyFunc is used to get a key in the underlying storage for a given object.
-	keyFunc func(runtime.Object) (string, error)
+	keyFunc func(context.Context, runtime.Object) (string, error)
 
 	// getAttrsFunc is used to get labels and fields of an object.
 	getAttrsFunc func(runtime.Object) (labels.Set, fields.Set, error)
@@ -164,7 +164,7 @@ type watchCache struct {
 }
 
 func newWatchCache(
-	keyFunc func(runtime.Object) (string, error),
+	keyFunc func(context.Context, runtime.Object) (string, error),
 	eventHandler func(*watchCacheEvent),
 	getAttrsFunc func(runtime.Object) (labels.Set, fields.Set, error),
 	versioner storage.Versioner,
@@ -283,7 +283,7 @@ func (w *watchCache) objectToVersionedRuntimeObject(obj interface{}) (runtime.Ob
 func (w *watchCache) processEvent(event watch.Event, resourceVersion uint64, updateFunc func(*store.Element) error) error {
 	metrics.EventsReceivedCounter.WithLabelValues(w.groupResource.Group, w.groupResource.Resource).Inc()
 
-	key, err := w.keyFunc(event.Object)
+	key, err := w.keyFunc(createClusterAwareContext(event.Object), event.Object)
 	if err != nil {
 		return fmt.Errorf("couldn't compute key: %v", err)
 	}
@@ -719,7 +719,7 @@ func (w *watchCache) Get(obj interface{}) (interface{}, bool, error) {
 	if !ok {
 		return nil, false, fmt.Errorf("obj does not implement runtime.Object interface: %v", obj)
 	}
-	key, err := w.keyFunc(object)
+	key, err := w.keyFunc(createClusterAwareContext(object), object)
 	if err != nil {
 		return nil, false, fmt.Errorf("couldn't compute key: %v", err)
 	}
@@ -745,7 +745,7 @@ func (w *watchCache) Replace(objs []interface{}, resourceVersion string) error {
 		if !ok {
 			return fmt.Errorf("didn't get runtime.Object for replace: %#v", obj)
 		}
-		key, err := w.keyFunc(object)
+		key, err := w.keyFunc(createClusterAwareContext(object), object)
 		if err != nil {
 			return fmt.Errorf("couldn't compute key: %v", err)
 		}
