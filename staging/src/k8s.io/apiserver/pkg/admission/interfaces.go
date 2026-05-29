@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	auditinternal "k8s.io/apiserver/pkg/apis/audit"
 	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/apiserver/pkg/authorization/authorizer"
 )
 
 // Attributes is an interface used by AdmissionController to get information about a request
@@ -143,8 +144,9 @@ type ValidationInterface interface {
 	Validate(ctx context.Context, a Attributes, o ObjectInterfaces) (err error)
 }
 
-// Operation is the type of resource operation being checked for admission control
-type Operation string
+// Operation is the type of resource operation being checked for admission control.
+// This type is sourced from the authorizer package to avoid import cycles.
+type Operation = authorizer.AdmissionOperation
 
 // Operation constants
 const (

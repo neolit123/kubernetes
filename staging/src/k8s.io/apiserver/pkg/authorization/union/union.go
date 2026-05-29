@@ -26,6 +26,7 @@ package union
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -70,14 +71,151 @@ func (authzHandler unionAuthzHandler) Authorize(ctx context.Context, a authorize
 	return authorizer.DecisionNoOpinion, strings.Join(reasonlist, "\n"), utilerrors.NewAggregate(errlist)
 }
 
-// ConditionsAwareAuthorize is not conditions-aware, converts the Authorize decision.
+// ConditionsAwareAuthorize walks the chain and collects ConditionsMaps from any
+// conditional authorizer. The first unconditional Allow or Deny stops the walk and
+// becomes the fallback. If all authorizers were NoOpinion or conditional, the fallback
+// is a NoOpinion that carries the aggregated errors and reasons from all intermediate
+// NoOpinion decisions (mirrors Authorize's error-accumulation behaviour).
 func (authzHandler unionAuthzHandler) ConditionsAwareAuthorize(ctx context.Context, a authorizer.Attributes) authorizer.ConditionsAwareDecision {
-	return authorizer.ConditionsAwareDecisionFromParts(authzHandler.Authorize(ctx, a))
+	var (
+		conditionsMaps   []authorizer.ConditionsMap
+		noOpinionErrs    []error
+		noOpinionReasons []string
+	)
+
+	for _, curr := range authzHandler {
+		decision := curr.ConditionsAwareAuthorize(ctx, a)
+
+		if decision.IsConditional() {
+			newMaps := decision.ConditionsMaps()
+			// Validate that every ConditionsMap carries an AuthorizerName so we can
+			// route EvaluateConditions later. Panic immediately on a programming error
+			// rather than silently dropping conditions.
+			for _, cm := range newMaps {
+				if cm.AuthorizerName() == "" {
+					panic(fmt.Sprintf("union authorizer: authorizer %T returned a conditional decision with an empty AuthorizerName; implement authorizer.Named", curr))
+				}
+			}
+			conditionsMaps = append(conditionsMaps, newMaps...)
+
+			// If the conditional decision already carries a decisive fallback (e.g. from
+			// a nested union that found an unconditional Allow/Deny further in its own
+			// chain), adopt it and stop — just as we would for a plain unconditional Allow
+			// or Deny. This preserves chain semantics through nested unions.
+			if fallback := decision.Fallback(); fallback.IsAllow() || fallback.IsDeny() {
+				return authorizer.ConditionsAwareDecisionConditionalMaps(conditionsMaps, fallback)
+			}
+			// Accumulate errors from the nested union's own NoOpinion fallback so that
+			// a webhook timeout buried in a sub-chain is not silently swallowed.
+			if fb := decision.Fallback(); fb.IsNoOpinion() {
+				if err := fb.Error(); err != nil {
+					noOpinionErrs = append(noOpinionErrs, err)
+				}
+				if reason := fb.Reason(); reason != "" {
+					noOpinionReasons = append(noOpinionReasons, reason)
+				}
+			}
+			continue
+		}
+
+		// Unconditional Allow or Deny: stop the chain. This becomes the fallback used
+		// by EvaluateConditions when all collected conditions evaluate to NoOpinion.
+		// Drop any accumulated NoOpinion errors/reasons, matching Authorize() semantics.
+		if decision.IsAllow() || decision.IsDeny() {
+			return authorizer.ConditionsAwareDecisionConditionalMaps(conditionsMaps, decision)
+		}
+
+		// NoOpinion: accumulate errors/reasons and continue, matching Authorize() semantics.
+		if err := decision.Error(); err != nil {
+			noOpinionErrs = append(noOpinionErrs, err)
+		}
+		if reason := decision.Reason(); reason != "" {
+			noOpinionReasons = append(noOpinionReasons, reason)
+		}
+	}
+
+	// Exhausted the chain without a decisive unconditional result. Surface accumulated
+	// NoOpinion errors so callers can distinguish a 403 (no error) from a 500 (error).
+	return authorizer.ConditionsAwareDecisionConditionalMaps(
+		conditionsMaps,
+		authorizer.ConditionsAwareDecisionNoOpinion(
+			strings.Join(noOpinionReasons, "\n"),
+			utilerrors.NewAggregate(noOpinionErrs),
+		),
+	)
 }
 
-// EvaluateConditions is not supported by this authorizer.
-func (unionAuthzHandler) EvaluateConditions(_ context.Context, _ authorizer.ConditionsAwareDecision, _ authorizer.ConditionsData) (authorizer.Decision, string, error) {
-	return authorizer.DecisionDeny, "", authorizer.ErrorConditionEvaluationNotSupported
+// EvaluateConditions evaluates each ConditionsMap in the decision by routing it to the
+// authorizer that produced it (looked up by AuthorizerName). The first Allow or Deny
+// wins. If all maps evaluate to NoOpinion, the fallback decision from ConditionsAwareAuthorize
+// is returned.
+func (authzHandler unionAuthzHandler) EvaluateConditions(ctx context.Context, unevaluated authorizer.ConditionsAwareDecision, data authorizer.ConditionsData) (authorizer.Decision, string, error) {
+	if unevaluated.IsUnconditional() {
+		return unevaluated.UnconditionalParts()
+	}
+
+	var (
+		errlist    []error
+		reasonlist []string
+	)
+
+	for _, cm := range unevaluated.ConditionsMaps() {
+		owner := authzHandler.findByName(cm.AuthorizerName())
+		if owner == nil {
+			// This is a programming error: a ConditionsMap was produced by an authorizer
+			// that is no longer present in the chain (e.g. a chain reload race).
+			return cm.FailClosedDecision(), "failed closed",
+				fmt.Errorf("union authorizer: no authorizer named %q found for EvaluateConditions; chain may have been reloaded", cm.AuthorizerName())
+		}
+
+		// Wrap the single ConditionsMap into a minimal conditional decision so the
+		// owner's EvaluateConditions implementation receives a well-typed input.
+		single := authorizer.ConditionsAwareDecisionConditionalMaps(
+			[]authorizer.ConditionsMap{cm},
+			authorizer.ConditionsAwareDecisionNoOpinion("", nil),
+		)
+
+		decision, reason, err := owner.EvaluateConditions(ctx, single, data)
+		if err != nil {
+			errlist = append(errlist, err)
+		}
+		if len(reason) != 0 {
+			reasonlist = append(reasonlist, reason)
+		}
+		switch decision {
+		case authorizer.DecisionAllow, authorizer.DecisionDeny:
+			return decision, reason, err
+		}
+		// DecisionNoOpinion: continue to the next map.
+	}
+
+	// All conditions evaluated to NoOpinion; return the fallback (the first unconditional
+	// Allow/Deny encountered during ConditionsAwareAuthorize, or NoOpinion if none).
+	fallback, fallbackReason, fallbackErr := unevaluated.Fallback().UnconditionalParts()
+	if len(reasonlist) > 0 && len(fallbackReason) == 0 {
+		fallbackReason = strings.Join(reasonlist, "\n")
+	}
+	if len(errlist) > 0 && fallbackErr == nil {
+		fallbackErr = utilerrors.NewAggregate(errlist)
+	}
+	return fallback, fallbackReason, fallbackErr
+}
+
+// findByName searches the chain (recursively into nested unions) for an authorizer
+// whose Named.AuthorizerName() equals name.
+func (authzHandler unionAuthzHandler) findByName(name string) authorizer.Authorizer {
+	for _, a := range authzHandler {
+		if n, ok := a.(authorizer.Named); ok && n.AuthorizerName() == name {
+			return a
+		}
+		// Recurse into nested unions so that nested chains work correctly.
+		if sub, ok := a.(unionAuthzHandler); ok {
+			if found := sub.findByName(name); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
 }
 
 // unionAuthzRulesHandler authorizer against a chain of authorizer.RuleResolver

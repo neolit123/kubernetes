@@ -37,14 +37,13 @@ func TestRecordAuthorizationDecisionsTotal(t *testing.T) {
 	authorizationDecisionsTotal.Reset()
 	RegisterMetrics()
 
-	dummyAuthorizer := &dummyAuthorizer{}
-	dummyConditionalAuthorizer := &dummyConditionalAuthorizer{}
-	a := InstrumentedAuthorizer("mytype", "myname", dummyAuthorizer)
-	ac := InstrumentedAuthorizer("myconditionaltype", "myconditionalname", dummyConditionalAuthorizer)
+	dummyAuthz := &dummyAuthorizer{}
+	dummyCondAuthz := &dummyConditionalAuthorizer{}
+	a := InstrumentedAuthorizer("mytype", "myname", dummyAuthz)
+	ac := InstrumentedAuthorizer("myconditionaltype", "myconditionalname", dummyCondAuthz)
 
-	// allow
-	{
-		dummyAuthorizer.decision = authorizer.DecisionAllow
+	t.Run("allow", func(t *testing.T) {
+		dummyAuthz.decision = authorizer.DecisionAllow
 		_, _, _ = a.Authorize(context.Background(), nil)
 		expectedValue := prefix + `
 			apiserver_authorization_decisions_total{decision="allowed",name="myname",type="mytype"} 1
@@ -53,12 +52,11 @@ func TestRecordAuthorizationDecisionsTotal(t *testing.T) {
 			t.Fatal(err)
 		}
 		authorizationDecisionsTotal.Reset()
-	}
+	})
 
-	// allow (conditional authorizer)
-	{
-		dummyConditionalAuthorizer.authorizeDecision = authorizer.ConditionsAwareDecisionAllow("", nil)
-		_, _, _ = ac.Authorize(context.Background(), nil)
+	t.Run("allow (conditional authorizer via ConditionsAwareAuthorize)", func(t *testing.T) {
+		dummyCondAuthz.authorizeDecision = authorizer.ConditionsAwareDecisionAllow("", nil)
+		_ = ac.ConditionsAwareAuthorize(context.Background(), nil)
 		expectedValue := prefix + `
 			apiserver_authorization_decisions_total{decision="allowed",name="myconditionalname",type="myconditionaltype"} 1
 		`
@@ -66,11 +64,23 @@ func TestRecordAuthorizationDecisionsTotal(t *testing.T) {
 			t.Fatal(err)
 		}
 		authorizationDecisionsTotal.Reset()
-	}
+	})
 
-	// deny
-	{
-		dummyAuthorizer.decision = authorizer.DecisionDeny
+	t.Run("allow (conditional authorizer via EvaluateConditions)", func(t *testing.T) {
+		dummyCondAuthz.evalDecision = authorizer.DecisionAllow
+		dummyCondAuthz.evalErr = nil
+		_, _, _ = ac.EvaluateConditions(context.Background(), authorizer.ConditionsAwareDecision{}, authorizer.ConditionsData{})
+		expectedValue := prefix + `
+			apiserver_authorization_decisions_total{decision="allowed",name="myconditionalname",type="myconditionaltype"} 1
+		`
+		if err := testutil.GatherAndCompare(legacyregistry.DefaultGatherer, strings.NewReader(expectedValue), metrics...); err != nil {
+			t.Fatal(err)
+		}
+		authorizationDecisionsTotal.Reset()
+	})
+
+	t.Run("deny", func(t *testing.T) {
+		dummyAuthz.decision = authorizer.DecisionDeny
 		_, _, _ = a.Authorize(context.Background(), nil)
 		_, _, _ = a.Authorize(context.Background(), nil)
 		expectedValue := prefix + `
@@ -80,13 +90,12 @@ func TestRecordAuthorizationDecisionsTotal(t *testing.T) {
 			t.Fatal(err)
 		}
 		authorizationDecisionsTotal.Reset()
-	}
+	})
 
-	// deny (conditional authorizer)
-	{
-		dummyConditionalAuthorizer.authorizeDecision = authorizer.ConditionsAwareDecisionDeny("", nil)
-		_, _, _ = ac.Authorize(context.Background(), nil)
-		_, _, _ = ac.Authorize(context.Background(), nil)
+	t.Run("deny (conditional authorizer via ConditionsAwareAuthorize)", func(t *testing.T) {
+		dummyCondAuthz.authorizeDecision = authorizer.ConditionsAwareDecisionDeny("", nil)
+		_ = ac.ConditionsAwareAuthorize(context.Background(), nil)
+		_ = ac.ConditionsAwareAuthorize(context.Background(), nil)
 		expectedValue := prefix + `
 			apiserver_authorization_decisions_total{decision="denied",name="myconditionalname",type="myconditionaltype"} 2
 		`
@@ -94,11 +103,24 @@ func TestRecordAuthorizationDecisionsTotal(t *testing.T) {
 			t.Fatal(err)
 		}
 		authorizationDecisionsTotal.Reset()
-	}
+	})
 
-	// no-opinion emits no metric
-	{
-		dummyAuthorizer.decision = authorizer.DecisionNoOpinion
+	t.Run("deny (conditional authorizer via EvaluateConditions)", func(t *testing.T) {
+		dummyCondAuthz.evalDecision = authorizer.DecisionDeny
+		dummyCondAuthz.evalErr = nil
+		_, _, _ = ac.EvaluateConditions(context.Background(), authorizer.ConditionsAwareDecision{}, authorizer.ConditionsData{})
+		_, _, _ = ac.EvaluateConditions(context.Background(), authorizer.ConditionsAwareDecision{}, authorizer.ConditionsData{})
+		expectedValue := prefix + `
+			apiserver_authorization_decisions_total{decision="denied",name="myconditionalname",type="myconditionaltype"} 2
+		`
+		if err := testutil.GatherAndCompare(legacyregistry.DefaultGatherer, strings.NewReader(expectedValue), metrics...); err != nil {
+			t.Fatal(err)
+		}
+		authorizationDecisionsTotal.Reset()
+	})
+
+	t.Run("no-opinion emits no metric", func(t *testing.T) {
+		dummyAuthz.decision = authorizer.DecisionNoOpinion
 		_, _, _ = a.Authorize(context.Background(), nil)
 		_, _, _ = a.Authorize(context.Background(), nil)
 		expectedValue := prefix + `
@@ -107,24 +129,35 @@ func TestRecordAuthorizationDecisionsTotal(t *testing.T) {
 			t.Fatal(err)
 		}
 		authorizationDecisionsTotal.Reset()
-	}
+	})
 
-	// no-opinion emits no metric (conditional authorizer)
-	{
-		dummyConditionalAuthorizer.authorizeDecision = authorizer.ConditionsAwareDecisionNoOpinion("", nil)
-		_, _, _ = ac.Authorize(context.Background(), nil)
-		_, _, _ = ac.Authorize(context.Background(), nil)
+	t.Run("no-opinion emits no metric (conditional authorizer via ConditionsAwareAuthorize)", func(t *testing.T) {
+		dummyCondAuthz.authorizeDecision = authorizer.ConditionsAwareDecisionNoOpinion("", nil)
+		_ = ac.ConditionsAwareAuthorize(context.Background(), nil)
+		_ = ac.ConditionsAwareAuthorize(context.Background(), nil)
 		expectedValue := prefix + `
 		`
 		if err := testutil.GatherAndCompare(legacyregistry.DefaultGatherer, strings.NewReader(expectedValue), metrics...); err != nil {
 			t.Fatal(err)
 		}
 		authorizationDecisionsTotal.Reset()
-	}
+	})
 
-	// unknown decision emits a metric
-	{
-		dummyAuthorizer.decision = authorizer.DecisionDeny + 10
+	t.Run("no-opinion emits no metric (conditional authorizer via EvaluateConditions)", func(t *testing.T) {
+		dummyCondAuthz.evalDecision = authorizer.DecisionNoOpinion
+		dummyCondAuthz.evalErr = nil
+		_, _, _ = ac.EvaluateConditions(context.Background(), authorizer.ConditionsAwareDecision{}, authorizer.ConditionsData{})
+		_, _, _ = ac.EvaluateConditions(context.Background(), authorizer.ConditionsAwareDecision{}, authorizer.ConditionsData{})
+		expectedValue := prefix + `
+		`
+		if err := testutil.GatherAndCompare(legacyregistry.DefaultGatherer, strings.NewReader(expectedValue), metrics...); err != nil {
+			t.Fatal(err)
+		}
+		authorizationDecisionsTotal.Reset()
+	})
+
+	t.Run("unknown decision emits a metric", func(t *testing.T) {
+		dummyAuthz.decision = authorizer.DecisionDeny + 10
 		_, _, _ = a.Authorize(context.Background(), nil)
 		expectedValue := prefix + `
 			apiserver_authorization_decisions_total{decision="unknown",name="myname",type="mytype"} 1
@@ -133,8 +166,24 @@ func TestRecordAuthorizationDecisionsTotal(t *testing.T) {
 			t.Fatal(err)
 		}
 		authorizationDecisionsTotal.Reset()
-	}
-	// TODO(luxas): Add a test for getting a conditional decision from ConditionsAwareAuthorize, and evaluating a condition, once introduced
+	})
+
+	t.Run("conditional emits a metric (conditional authorizer via ConditionsAwareAuthorize)", func(t *testing.T) {
+		dummyCondAuthz.authorizeDecision = authorizer.ConditionsAwareDecisionConditional(
+			"dummy",
+			nil, nil,
+			[]authorizer.Condition{authorizer.GenericCondition{ID: "foo"}},
+		)
+		_ = ac.ConditionsAwareAuthorize(context.Background(), nil)
+		_ = ac.ConditionsAwareAuthorize(context.Background(), nil)
+		expectedValue := prefix + `
+			apiserver_authorization_decisions_total{decision="conditional",name="myconditionalname",type="myconditionaltype"} 2
+		`
+		if err := testutil.GatherAndCompare(legacyregistry.DefaultGatherer, strings.NewReader(expectedValue), metrics...); err != nil {
+			t.Fatal(err)
+		}
+		authorizationDecisionsTotal.Reset()
+	})
 }
 
 type dummyAuthorizer struct {
