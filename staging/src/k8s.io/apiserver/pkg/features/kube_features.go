@@ -77,6 +77,14 @@ const (
 	// preferred storage encoding for custom resources.
 	CBORServingAndStorage featuregate.Feature = "CBORServingAndStorage"
 
+	// owner: @luxas
+	// kep: https://kep.k8s.io/5681
+	//
+	// Enables conditional authorization, where authorizers can return conditions
+	// (residual expressions) that depend on the request/stored object. These
+	// conditions are enforced during the validating admission phase.
+	ConditionalAuthorization featuregate.Feature = "ConditionalAuthorization"
+
 	// owner: @serathius
 	// Enables concurrent watch object decoding to avoid starving watch cache when conversion webhook is installed.
 	ConcurrentWatchObjectDecode featuregate.Feature = "ConcurrentWatchObjectDecode"
@@ -315,6 +323,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 
 	CBORServingAndStorage: {
 		{Version: version.MustParse("1.32"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
+	ConditionalAuthorization: {
+		{Version: version.MustParse("1.37"), Default: false, PreRelease: featuregate.Alpha},
 	},
 
 	ConcurrentWatchObjectDecode: {
